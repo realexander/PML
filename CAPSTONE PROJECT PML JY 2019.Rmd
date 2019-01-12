@@ -1,0 +1,144 @@
+---
+title: "PML_JYPROJECT"
+author: "JY"
+date: "12 de enero de 2019"
+output: 
+  html_document:
+    theme: cerulean
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Summary: 
+
+In this repot I present the process of predicting the way some barbell lifts are performed using data from sport wearables. In first place I check the quality of data observing that there are multiple variables with empty values or NA's. Then using predictors without quality problems I train X models with cross validation (K=5). Finally with the best model I present the prediction for the testing cases evaluated on the course's website.
+
+# Setup
+
+```{r, message=FALSE, warning=FALSE}
+
+library(caret)
+library(ggplot2)
+library(dplyr)
+```
+
+
+
+
+# Loading Data
+
+```{r}
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+```
+
+# Exploratory Data Analysis 
+
+The training set contains a vast amount of data with `r dim(training)[1]` observations and `r dim(training)[2]` variables. The test dataset only contains 20 observations over the same number of variables. 
+
+
+
+```{r}
+na_count <-data.frame(N = sapply(training, function(y) sum(length(which(is.na(y))))))
+
+na_count$type <- na_count>0
+
+ggplot(na_count , aes(x=type,fill=type))+geom_bar()+ theme_classic()+ggtitle("Number of Variables")+xlab("Without NA's")
+
+
+```
+
+The process of feature selection consisted on selecting variables with variance and iterating with Random Forest algorithm considering his high performance. Starting from 1 variable and adding new variables checking the accuracy on cross validation and making visual inspections on variables tested (see Image below). I have not tested training the model with all the variables due to limitations on computer capacity.  
+In this example the variable *pitch_belt* showed discriminatory capacity on the problem given the different distributions by classe. 
+
+```{r}
+ggplot(training, aes(x=pitch_belt, fill = classe))+geom_density(alpha = 0.6)
+```
+
+
+# Cross Validation Config 
+
+In this section I configured the Cross-validation process for training the models. I used 5-Fold cross validation given the amount of data available. In a case with less data it worth using more fold and even bootstrapping. 
+
+```{r}
+kfold_config<-trainControl(method="cv",
+                           number= 5,
+                           summaryFunction=defaultSummary,
+                           classProbs = TRUE,
+                           savePredictions = T,
+                           verboseIter = F)
+
+```
+
+
+# Model training 
+
+I trained several state of the classification algorithms. The pre-process used is *center* and *scale* for standarizing variables and improving performance. The models trained are: Linear Discriminant Analysis, Naive Bayes, Decision Tree, Random Forest and Gradien Boosting Machine. 
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+
+f <- as.formula("classe ~ roll_belt + pitch_belt + yaw_belt +roll_dumbbell+pitch_dumbbell+yaw_dumbbell+ magnet_forearm_x+magnet_forearm_y+magnet_forearm_z+accel_forearm_x+ accel_forearm_y+ accel_forearm_z+magnet_belt_z")
+
+rf_model <- train(f,  
+                  data=training, 
+                  trControl=kfold_config,
+                  na.action = na.omit,
+                  method="rf",
+                  preProcess=c("center","scale"),
+                  ntree=500,
+                  tuneGrid=expand.grid(.mtry=c(2)))
+
+gbm_model <- train(f,  
+                  data=training, 
+                  trControl=kfold_config,
+                  na.action = na.omit,
+                  method="gbm",
+                  preProcess=c("center","scale"),
+                  verbose=FALSE)
+
+rpart.grid<- expand.grid(cp=c(0.01))
+dt_model <- train(f, 
+                  data=training, 
+                  trControl=kfold_config,
+                  na.action = na.omit,
+                  method="rpart",
+                  tuneGrid = rpart.grid,
+                  preProcess=c("center","scale"))
+lda_model <- train(f, 
+                  data=training, 
+                  trControl=kfold_config,
+                  na.action = na.omit,
+                  method="lda",
+                  preProcess=c("center","scale"))
+
+nb_model <- train(f, 
+                  data=training, 
+                  trControl=kfold_config,
+                  na.action = na.omit,
+                  method="naive_bayes",
+                  preProcess=c("center","scale"))
+
+
+```
+
+## Summary of Performance on Cross-validation training
+```{r}
+results <- resamples(list(GBM = gbm_model, DT = dt_model,RF = rf_model, NB=nb_model, LDA = lda_model))
+bwplot(results)
+
+```
+
+Finally using the best algorithm on the Cross-validation training step I predict the *classe* on the testing set. 
+
+# Prediction on test set 
+
+```{r}
+data.frame(Case=testing$X, Prediction = predict(gbm_model, testing))
+```
+
+
+
+
+
